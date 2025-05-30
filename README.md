@@ -66,7 +66,7 @@ the agent neural network and query execution.
     wget https://ftp.postgresql.org/pub/source/v12.5/postgresql-12.5.tar.gz
     tar xzvf postgresql-12.5.tar.gz
     cd postgresql-12.5
-    ./configure --prefix=/data/postgresql-12.5 --without-readline
+    ./configure --prefix=/data/postgresql-12.5 --without-readline CFLAGS="-std=c17"
     sudo make -j
     sudo make install
 
