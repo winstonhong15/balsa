@@ -3,7 +3,7 @@ import pprint
 import numpy as np
 import ray
 
-from balsa.util import plans_lib, postgres
+from balsa.util import duck_db, plans_lib, postgres
 
 @ray.remote
 def ExecuteSql(query_name,
@@ -19,6 +19,7 @@ def ExecuteSql(query_name,
                is_test=False,
                use_local_execution=True,
                plan_physical=True,
+               use_optimizer=False,
                repeat=1,
                engine='postgres'):
     """Executes a query.
@@ -41,6 +42,8 @@ def ExecuteSql(query_name,
                                           geqo_off=True,
                                           timeout_ms=curr_timeout_ms,
                                           remote=not use_local_execution)
+    elif engine == 'duckdb':
+        return duck_db.Execute(sql_str, use_optimizer, curr_timeout_ms)
     else:
         return DbmsxExecuteSql(sql_str,
                                comment=hint_str,
@@ -112,6 +115,8 @@ def ParseExecutionResult(result_tup,
         assert not result, result
     if engine == 'dbmsx':
         real_cost = -1 if has_timeout else result_tup.latency
+    elif engine == 'duckdb':
+        real_cost = -1 if has_timeout else result_tup.latency
     else:
         if has_timeout:
             real_cost = -1
@@ -120,11 +125,11 @@ def ParseExecutionResult(result_tup,
             real_cost = json_dict['Execution Time']
     if hint_str is not None:
         # Check that the hint has been respected.  No need to check if running
-        # baseline.
+        # baseline or duckdb
         do_hint_check = True
         if engine == 'dbmsx':
             raise NotImplementedError
-        else:
+        elif engine == 'postgre':
             if not has_timeout:
                 executed_node = postgres.ParsePostgresPlanJson(json_dict)
             else:

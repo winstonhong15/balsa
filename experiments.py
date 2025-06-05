@@ -74,7 +74,7 @@ class BalsaParams(object):
             'Similar usage as query_glob. If None, treat all queries as training nodes.'
         )
         p.Define('engine', 'postgres',
-                 'The execution engine.  Options: postgres.')
+                 'The execution engine.  Options: postgres, duckdb')
         p.Define('engine_dialect_query_dir', None,
                  'Directory of the .sql queries in target engine\'s dialect.')
         p.Define('run_baseline', False,

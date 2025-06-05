@@ -1,13 +1,14 @@
 import collections
 import contextlib
 import json
+import time
 from typing import Optional
 
 import duckdb
 
 Result = collections.namedtuple(
     'Result',
-    ['result', 'has_timeout'],
+    ['result', 'has_timeout', 'latency', 'server_ip'],
 )
 
 dsn = '~/data/duckdb/imdb/imdb.db'
@@ -24,29 +25,32 @@ def Cursor(dsn=dsn):
         conn.close()
 
 
-def Execute(sql: str, disable_optimizer = True, timeout_ms: Optional[int]=None, cursor: Optional['duckdb.DuckDBPyConnection']=None):
+def Execute(sql: str, use_optimizer=False, timeout_ms: Optional[int]=None, cursor: Optional['duckdb.DuckDBPyConnection']=None):
     if cursor is None:
         with Cursor() as cursor:
-            return Execute(sql, timeout_ms=timeout_ms, cursor=cursor)
-    if disable_optimizer:
-        cursor.execute('PRAGMA disable_optimizer')
+            return Execute(sql, use_optimizer, timeout_ms=timeout_ms, cursor=cursor)
+    if use_optimizer:
+        cursor.sql('PRAGMA enable_optimizer')
     else:
-        cursor.execute('PRAGMA enable_optimizer')
+        cursor.sql('PRAGMA disable_optimizer')
     # for getting query latency
-    cursor.execute("PRAGMA enable_profiling=json")
-    cursor.execute("PRAGMA profile_output='output.json'")
+    cursor.sql("PRAGMA enable_profiling=json")
+    cursor.sql("PRAGMA profile_output='output.json'")
+
     if timeout_ms is not None:
         raise NotImplementedError
     else:
-        res = cursor.execute(sql).fetchall()
-    __get_executation_time()
-    return Result(res, False)
+        res = cursor.sql(sql).fetchall()
+    latency = __get_executation_time()
+    return Result(res, False, latency, '')
     
-def __get_executation_time():
-    with open('output.json') as file:
+def __get_executation_time(path='output.json'):
+    latency = -1
+    with open(path) as file:
         json_raw_content = file.read()
         json_content = json.loads(json_raw_content)
-        print(json_content['latency'])
+        latency = json_content['latency']
+    return latency
 
 if __name__ == '__main__':
     sql = 'SELECT count(1);'

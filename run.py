@@ -57,7 +57,7 @@ from balsa.models.transformer import Transformer
 from balsa.models.transformer import TransformerV2
 from balsa.models.treeconv import TreeConvolution
 import balsa.optimizer as optim
-from balsa.util import dataset as ds
+from balsa.util import dataset as ds, duck_db
 from balsa.util import plans_lib
 from balsa.util import postgres
 
@@ -970,7 +970,21 @@ class BalsaAgent(object):
         postgres.DropBufferCache()
         print('Running queries as-is (baseline PG performance)...')
 
-        def Args(node):
+        def RunArgs(node):
+            return {
+                'query_name': node.info['query_name'],
+                'sql_str': node.info['sql_str'],
+                'hint_str': None,
+                'hinted_plan': None,
+                'query_node': node,
+                'predicted_latency': 0,
+                'silent': True,
+                'use_local_execution': p.use_local_execution,
+                'use_optimizer': True,
+                'engine': p.engine,
+            }
+        
+        def ParseArgs(node):
             return {
                 'query_name': node.info['query_name'],
                 'sql_str': node.info['sql_str'],
@@ -989,7 +1003,7 @@ class BalsaAgent(object):
             tasks.append(
                 ExecuteSql.options(resources={
                     f'node:{ray.util.get_node_ip_address()}': 1,
-                }).remote(**Args(node)))
+                }).remote(**RunArgs(node)))
         if not p.use_local_execution:
             refs = ray.get(tasks)
         else:
@@ -998,9 +1012,9 @@ class BalsaAgent(object):
             result_tup = ray.get(refs[i])
             assert isinstance(
                 result_tup,
-                (pg_executor.Result, dbmsx_executor.Result)), result_tup
+                (pg_executor.Result, dbmsx_executor.Result, duck_db.Result)), result_tup
             result, real_cost, _, message = ParseExecutionResult(
-                result_tup, **Args(node))
+                result_tup, **ParseArgs(node))
             # Save real cost (execution latency) to actual.
             node.cost = real_cost
             print('---------------------------------------')
@@ -1015,7 +1029,7 @@ class BalsaAgent(object):
             print('Execution time: {}'.format(real_cost))
         # NOTE: if engine != pg, we're still saving PG plans but with target
         # engine's latencies.  This mainly affects debug strings.
-        Save(self.workload, './data/initial_policy_data.pkl')
+        Save(self.workload, p.init_experience)
         self.LogExpertExperience(self.train_nodes, self.test_nodes)
 
     def Train(self, train_from_scratch=False):
