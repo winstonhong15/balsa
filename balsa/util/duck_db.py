@@ -1,7 +1,6 @@
 import collections
 import contextlib
 import json
-import time
 from typing import Optional
 
 import duckdb

@@ -89,9 +89,65 @@ def ExplainAnalyzeSql(sql,
                         remote=remote)
 
 
+def ParsePostgresPlanJson(json_dict):
+    """Takes JSON dict, parses into a Node."""
+    curr = json_dict['Plan']
+
+    def _parse_pg(json_dict, select_exprs=None, indent=0):
+        op = json_dict['Node Type']
+        cost = json_dict['Total Cost']
+        if op == 'Aggregate':
+            op = json_dict['Partial Mode'] + op
+            if select_exprs is None:
+                # Record the SELECT <select_exprs> at the topmost Aggregate.
+                # E.g., ['min(mi.info)', 'min(miidx.info)', 'min(t.title)'].
+                select_exprs = json_dict['Output']
+
+        # Record relevant info.
+        curr_node = plans_lib.Node(op)
+        curr_node.cost = cost
+        # Only available if 'analyze' is set (actual execution).
+        curr_node.actual_time_ms = json_dict.get('Actual Total Time')
+        if 'Relation Name' in json_dict:
+            curr_node.table_name = json_dict['Relation Name']
+            curr_node.table_alias = json_dict['Alias']
+
+        # Unary predicate on a table.
+        if 'Filter' in json_dict:
+            assert 'Scan' in op, json_dict
+            assert 'Relation Name' in json_dict, json_dict
+            curr_node.info['filter'] = json_dict['Filter']
+
+        if 'Scan' in op and select_exprs:
+            # Record select exprs that belong to this leaf.
+            # Assume: SELECT <exprs> are all expressed in terms of aliases.
+            filtered = _FilterExprsByAlias(select_exprs, json_dict['Alias'])
+            if filtered:
+                curr_node.info['select_exprs'] = filtered
+
+        # Recurse.
+        if 'Plans' in json_dict:
+            for n in json_dict['Plans']:
+                curr_node.children.append(
+                    _parse_pg(n, select_exprs=select_exprs, indent=indent + 2))
+
+        # Special case.
+        if op == 'Bitmap Heap Scan':
+            for c in curr_node.children:
+                if c.node_type == 'Bitmap Index Scan':
+                    # 'Bitmap Index Scan' doesn't have the field 'Relation Name'.
+                    c.table_name = curr_node.table_name
+                    c.table_alias = curr_node.table_alias
+
+        return curr_node
+
+    return _parse_pg(curr)
+
+
 def SqlToPlanNode(sql,
                   comment=None,
                   verbose=False,
+                  parser=ParsePostgresPlanJson,
                   keep_scans_joins_only=False,
                   cursor=None):
     """Issues EXPLAIN(format json) on a SQL string; parse into our AST node."""
@@ -107,7 +163,7 @@ def SqlToPlanNode(sql,
                           geqo_off=geqo_off,
                           cursor=cursor).result
     json_dict = result[0][0][0]
-    node = ParsePostgresPlanJson(json_dict)
+    node = parser(json_dict)
     if not keep_scans_joins_only:
         return node, json_dict
     return plans_lib.FilterScansOrJoins(node), json_dict
@@ -252,61 +308,6 @@ def _FilterExprsByAlias(exprs, table_alias):
     # Look for <table_alias>.<stuff>.
     pattern = re.compile('.*\(?\\b{}\\b\..*\)?'.format(table_alias))
     return list(filter(pattern.match, exprs))
-
-
-def ParsePostgresPlanJson(json_dict):
-    """Takes JSON dict, parses into a Node."""
-    curr = json_dict['Plan']
-
-    def _parse_pg(json_dict, select_exprs=None, indent=0):
-        op = json_dict['Node Type']
-        cost = json_dict['Total Cost']
-        if op == 'Aggregate':
-            op = json_dict['Partial Mode'] + op
-            if select_exprs is None:
-                # Record the SELECT <select_exprs> at the topmost Aggregate.
-                # E.g., ['min(mi.info)', 'min(miidx.info)', 'min(t.title)'].
-                select_exprs = json_dict['Output']
-
-        # Record relevant info.
-        curr_node = plans_lib.Node(op)
-        curr_node.cost = cost
-        # Only available if 'analyze' is set (actual execution).
-        curr_node.actual_time_ms = json_dict.get('Actual Total Time')
-        if 'Relation Name' in json_dict:
-            curr_node.table_name = json_dict['Relation Name']
-            curr_node.table_alias = json_dict['Alias']
-
-        # Unary predicate on a table.
-        if 'Filter' in json_dict:
-            assert 'Scan' in op, json_dict
-            assert 'Relation Name' in json_dict, json_dict
-            curr_node.info['filter'] = json_dict['Filter']
-
-        if 'Scan' in op and select_exprs:
-            # Record select exprs that belong to this leaf.
-            # Assume: SELECT <exprs> are all expressed in terms of aliases.
-            filtered = _FilterExprsByAlias(select_exprs, json_dict['Alias'])
-            if filtered:
-                curr_node.info['select_exprs'] = filtered
-
-        # Recurse.
-        if 'Plans' in json_dict:
-            for n in json_dict['Plans']:
-                curr_node.children.append(
-                    _parse_pg(n, select_exprs=select_exprs, indent=indent + 2))
-
-        # Special case.
-        if op == 'Bitmap Heap Scan':
-            for c in curr_node.children:
-                if c.node_type == 'Bitmap Index Scan':
-                    # 'Bitmap Index Scan' doesn't have the field 'Relation Name'.
-                    c.table_name = curr_node.table_name
-                    c.table_alias = curr_node.table_alias
-
-        return curr_node
-
-    return _parse_pg(curr)
 
 
 def EstimateFilterRows(nodes):
