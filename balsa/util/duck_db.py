@@ -1,6 +1,8 @@
 import collections
 import contextlib
 import json
+import os
+from pathlib import Path
 from typing import Optional
 
 import duckdb
@@ -10,7 +12,7 @@ Result = collections.namedtuple(
     ['result', 'has_timeout', 'latency', 'server_ip'],
 )
 
-dsn = '~/data/duckdb/imdb/imdb.db'
+dsn = os.path.join(str(Path.home()), 'duckdb', 'imdb.db')
 
 @contextlib.contextmanager
 def Cursor(dsn=dsn):

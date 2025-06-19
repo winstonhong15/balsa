@@ -287,6 +287,68 @@ class Node(object):
         else:
             sql = 'SELECT {} FROM {};'.format(select_str, from_str)
         return sql
+    
+    def rewrite_filters(self, filters):
+        """
+            Rule:
+            1. Remove type annotations like ::text
+            2. Replace ~~ with LIKE, !~~ with NOT LIKE
+        """
+        rewritten_filters = []
+        for f in filters:
+            # Remove type annotations.
+            f = re.sub(r'::[a-z]+', '', f)
+            # Replace ~~ with LIKE, !~~ with NOT LIKE.
+            f = f.replace(' ~~ ', ' LIKE ').replace(' !~~ ', ' NOT LIKE ')
+            rewritten_filters.append(f)
+        return rewritten_filters
+
+    
+    def rewrite_sql(self):
+        """Rewrite the SQL based on the query plan."""
+
+        def helper(t):
+            children = []
+            for child in t.children:
+                child_query = helper(child)
+                if child_query != '':
+                    children.append(child_query)
+            if t.IsScan():
+                assert len(children) == 0, 'Scan node should not have children.'
+                if t.table_alias:
+                    return '{} AS {}'.format(t.table_name, t.table_alias)
+                return '{}'.format(t.table_name)
+            elif t.IsJoin():
+                assert len(children) == 2, 'Join node should have 2 children.'
+                return '({} CROSS JOIN {})'.format(children[0], children[1])
+            elif len(children) == 1:
+                return children[0]
+            return ''
+
+        join_order = helper(self)
+
+        join_conds = self.KeepRelevantJoins(self.info['parsed_join_conds'])
+
+        select_exprs = self.GetSelectExprs()
+        select_str = '*' if len(select_exprs) == 0 else ','.join(select_exprs)
+
+        # TODO: Rewrite the filters.
+        filters = self.GetFilters()
+        filters = self.rewrite_filters(filters)
+        if len(filters) > 0 and len(join_conds) > 0:
+            sql = 'SELECT {} FROM ({}) WHERE {} AND {};'.format(
+                select_str, join_order, ' AND '.join(join_conds),
+                ' AND '.join(filters))
+        elif len(join_conds) > 0:
+            sql = 'SELECT {} FROM ({}) WHERE {};'.format(select_str, join_order,
+                                                       ' AND '.join(join_conds))
+        elif len(filters) > 0:
+            sql = 'SELECT {} FROM ({}) WHERE {};'.format(select_str, join_order,
+                                                       ' AND '.join(filters))
+        else:
+            sql = 'SELECT {} FROM ({})'.format(select_str, join_order)
+
+        return sql
 
     @functools.lru_cache(maxsize=2)
     def hint_str(self, with_physical_hints=False):

@@ -25,12 +25,12 @@ from balsa.util import postgres
 _EPSILON = 1e-6
 
 
-def ParseSqlToNode(path, parser=postgres.ParsePostgresPlanJson):
+def ParseSqlToNode(path):
     base = os.path.basename(path)
     query_name = os.path.splitext(base)[0]
     with open(path, 'r') as f:
         sql_string = f.read()
-    node, json_dict = postgres.SqlToPlanNode(sql_string, parser=parser)
+    node, json_dict = postgres.SqlToPlanNode(sql_string)
     node.info['path'] = path
     node.info['sql_str'] = sql_string
     node.info['query_name'] = query_name

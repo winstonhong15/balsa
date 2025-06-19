@@ -147,7 +147,6 @@ def ParsePostgresPlanJson(json_dict):
 def SqlToPlanNode(sql,
                   comment=None,
                   verbose=False,
-                  parser=ParsePostgresPlanJson,
                   keep_scans_joins_only=False,
                   cursor=None):
     """Issues EXPLAIN(format json) on a SQL string; parse into our AST node."""
@@ -163,7 +162,7 @@ def SqlToPlanNode(sql,
                           geqo_off=geqo_off,
                           cursor=cursor).result
     json_dict = result[0][0][0]
-    node = parser(json_dict)
+    node = ParsePostgresPlanJson(json_dict)
     if not keep_scans_joins_only:
         return node, json_dict
     return plans_lib.FilterScansOrJoins(node), json_dict
