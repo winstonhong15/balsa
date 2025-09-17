@@ -26,7 +26,8 @@ import ray
 
 # JOB/IMDB.
 # LOCAL_DSN = "postgres://psycopg:psycopg@localhost/imdb"
-LOCAL_DSN = "host=/tmp dbname=imdbload"
+# LOCAL_DSN = "host=/tmp dbname=imdbload"
+LOCAL_DSN = "host=/tmp dbname=imdbload port=5418"
 REMOTE_DSN = "postgres://psycopg:psycopg@localhost/imdbload"
 
 # TPC-H.

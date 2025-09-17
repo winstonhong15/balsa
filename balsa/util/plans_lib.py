@@ -291,20 +291,30 @@ class Node(object):
     def rewrite_filters(self, filters):
         """
             Rule:
-            1. Remove type annotations like ::text
-            2. Replace ~~ with LIKE, !~~ with NOT LIKE
+            1. Rewrite to IN (...) if matched
+            2. Remove type annotations like ::text
+            3. Replace ~~ with LIKE, !~~ with NOT LIKE
         """
         rewritten_filters = []
-        for f in filters:
-            # Remove type annotations.
-            f = re.sub(r'::[a-z]+', '', f)
-            # Replace ~~ with LIKE, !~~ with NOT LIKE.
-            f = f.replace(' ~~ ', ' LIKE ').replace(' !~~ ', ' NOT LIKE ')
-            rewritten_filters.append(f)
-        return rewritten_filters
+        pattern = r"\((?:\(\s*)?(?P<table>\w+)\.(?P<column>\w+)(?:\s*\))?(?:::\w+)?\s*=\s*ANY\s*\('{(?P<keywords>[^}]+)}'::text\[]\)\)"
+        for filter in filters:
+            # print(filter)
+            match = re.search(pattern, filter)
+            if match:
+                keywords_list = [keyword.strip(' "') for keyword in match.group('keywords').split(',')]
+                keywords_list = [f"'{keyword}'" for keyword in keywords_list]
 
+                new_keywords_str = ','.join(keywords_list)
+                rewritten_filters.append(f"{match.group('table')}.{match.group('column')} IN ({new_keywords_str})")
+            else:
+                # Remove type annotations.
+                rewritten_filter = re.sub(r'::[a-z]+', '', filter)
+                # Replace ~~ with LIKE, !~~ with NOT LIKE.
+                rewritten_filter = rewritten_filter.replace(' ~~ ', ' LIKE ').replace(' !~~ ', ' NOT LIKE ')
+                rewritten_filters.append(rewritten_filter)
+        return rewritten_filters
     
-    def rewrite_sql(self):
+    def generate_duckdb_sql(self):
         """Rewrite the SQL based on the query plan."""
 
         def helper(t):
@@ -327,12 +337,13 @@ class Node(object):
 
         join_order = helper(self)
 
-        join_conds = self.KeepRelevantJoins(self.info['parsed_join_conds'])
+        join_conds = []
+        if self.info.get('parsed_join_conds'):
+            join_conds = self.KeepRelevantJoins(self.info['parsed_join_conds'])
 
         select_exprs = self.GetSelectExprs()
         select_str = '*' if len(select_exprs) == 0 else ','.join(select_exprs)
 
-        # TODO: Rewrite the filters.
         filters = self.GetFilters()
         filters = self.rewrite_filters(filters)
         if len(filters) > 0 and len(join_conds) > 0:

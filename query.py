@@ -43,7 +43,7 @@ def ExecuteSql(query_name,
                                           timeout_ms=curr_timeout_ms,
                                           remote=not use_local_execution)
     elif engine == 'duckdb':
-        return duck_db.Execute(sql_str, use_optimizer, curr_timeout_ms)
+        return duck_db.Execute(sql_str, hint_str, use_optimizer, curr_timeout_ms)
     else:
         return DbmsxExecuteSql(sql_str,
                                comment=hint_str,
@@ -57,6 +57,7 @@ def AddCommentToSql(sql_str, comment, engine):
     fns = {
         'postgres': PostgresAddCommentToSql,
         'dbmsx': DbmsxAddCommentToSql,
+        'duckdb': DuckDBAddCommentToSql,
     }
     return fns[engine](sql_str, comment)
 
@@ -68,6 +69,12 @@ def PostgresAddCommentToSql(sql_str, comment=None):
 
 def DbmsxAddCommentToSql(sql_str, comment=None):
     raise NotImplementedError
+
+def DuckDBAddCommentToSql(sql_str, comment=None):
+    """For duckdb the hint str itself is a sql statement"""
+    if comment:
+        return comment
+    return sql_str
 
 
 def DbmsxExecuteSql(sql_str,
@@ -86,6 +93,8 @@ def DbmsxNodeToHintStr(node, with_physical_hints=False):
 def HintStr(node, with_physical_hints, engine):
     if engine == 'postgres':
         return node.hint_str(with_physical_hints=with_physical_hints)
+    elif engine == 'duckdb':
+        return node.generate_duckdb_sql()
     assert engine == 'dbmsx', engine
     return DbmsxNodeToHintStr(node, with_physical_hints=with_physical_hints)
 
@@ -129,6 +138,8 @@ def ParseExecutionResult(result_tup,
         do_hint_check = True
         if engine == 'dbmsx':
             raise NotImplementedError
+        elif engine == 'duckdb':
+            do_hint_check = False
         elif engine == 'postgre':
             if not has_timeout:
                 executed_node = postgres.ParsePostgresPlanJson(json_dict)

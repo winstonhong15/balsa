@@ -1,4 +1,5 @@
 import collections
+import concurrent.futures
 import contextlib
 import json
 import os
@@ -26,23 +27,40 @@ def Cursor(dsn=dsn):
         conn.close()
 
 
-def Execute(sql: str, use_optimizer=False, timeout_ms: Optional[int]=None, cursor: Optional['duckdb.DuckDBPyConnection']=None):
+def Execute(sql: str, hinted_plan: Optional[str]=None, use_optimizer=False, timeout_ms: Optional[int]=None, cursor: Optional['duckdb.DuckDBPyConnection']=None):
     if cursor is None:
         with Cursor() as cursor:
-            return Execute(sql, use_optimizer, timeout_ms=timeout_ms, cursor=cursor)
-    if use_optimizer:
-        cursor.sql('PRAGMA enable_optimizer')
-    else:
-        cursor.sql('PRAGMA disable_optimizer')
-    # for getting query latency
-    cursor.sql("PRAGMA enable_profiling=json")
-    cursor.sql("PRAGMA profile_output='output.json'")
+            return Execute(sql, hinted_plan, use_optimizer, timeout_ms=timeout_ms, cursor=cursor)
 
     if timeout_ms is not None:
-        raise NotImplementedError
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(Execute, sql, hinted_plan, use_optimizer, timeout_ms=None, cursor=cursor)
+            try:
+                result = future.result(timeout=timeout_ms / 1000)
+                return result
+            except concurrent.futures.TimeoutError:
+                cursor.interrupt()
+                return Result(None, True, -1, '')
     else:
-        res = cursor.sql(sql).fetchall()
-    latency = __get_executation_time()
+        sql_to_run = sql
+        if hinted_plan:
+            sql_to_run = hinted_plan
+        # print('Execute duckdb query:', sql_to_run)
+        if use_optimizer:
+            cursor.execute('PRAGMA enable_optimizer')
+        else:
+            cursor.execute("SET disabled_optimizers = 'join_order,build_side_probe_side'")
+        # for getting query latency
+        cursor.execute("PRAGMA enable_profiling=json")
+        cursor.execute("PRAGMA profile_output='output.json'")
+        cursor.execute("SET memory_limit = '32GB'")
+        try:
+            res = cursor.sql(sql_to_run).fetchall()
+        except Exception as e:
+            print(e)
+            return Result(None, True, -1, '')
+    # latency reported by duckdb is in seconds
+    latency = __get_executation_time() * 1000
     return Result(res, False, latency, '')
     
 def __get_executation_time(path='output.json'):
@@ -54,5 +72,8 @@ def __get_executation_time(path='output.json'):
     return latency
 
 if __name__ == '__main__':
-    sql = 'SELECT count(1);'
-    print(Execute(sql))
+    query = 'SELECT count(1);'
+    print(Execute(query))
+
+    timeout_query = "select count(*) from range(1000000000000)" # Long running query
+    print(Execute(timeout_query, timeout_ms=100))

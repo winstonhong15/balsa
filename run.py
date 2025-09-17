@@ -937,6 +937,7 @@ class BalsaAgent(object):
                  node.cost / 1e3, 0))
             total_s += node.cost / 1e3
             num_joins.append(len(node.leaf_ids()) - 1)
+        print('Total:', total_s)
         data_to_log.append(('latency_expert/workload', total_s, 0))
         print('latency_expert/workload (seconds): {:.2f} ({} queries)'.format(
             total_s, len(expert_train_nodes)))
@@ -1249,6 +1250,10 @@ class BalsaAgent(object):
                               node.info['curr_predicted_latency'] / 1e3,
                               self.curr_value_iter)])
 
+            if node.info.get('parsed_join_conds'):
+                if not found_plan.info.get('parsed_join_conds'):
+                    found_plan.info['parsed_join_conds'] = node.info['parsed_join_conds']
+
             hint_str = HintStr(found_plan,
                                with_physical_hints=p.plan_physical,
                                engine=p.engine)
@@ -1386,7 +1391,7 @@ class BalsaAgent(object):
                     #     raise NotImplementedError
                     is_cached_plan = False
                     print('Retry succeeded.')
-            elif isinstance(task, (pg_executor.Result, dbmsx_executor.Result)):
+            elif isinstance(task, (pg_executor.Result, dbmsx_executor.Result, duck_db.Result)):
                 # New plan: local PG execution.
                 result_tup = task
                 is_cached_plan = False
@@ -1405,7 +1410,7 @@ class BalsaAgent(object):
                 result_tup = cached_result_tup
             assert isinstance(
                 result_tup,
-                (pg_executor.Result, dbmsx_executor.Result)), result_tup
+                (pg_executor.Result, dbmsx_executor.Result, duck_db.Result)), result_tup
             result_tups = ParseExecutionResult(result_tup, **kwargs[i])
             assert len(result_tups) == 4
             print(result_tups[-1])  # Messages.
@@ -1958,12 +1963,19 @@ def Main(argv):
 
     p.use_local_execution = FLAGS.local
     # Override params here for quick debugging.
-    # p.sim_checkpoint = None
     # p.epochs = 1
     # p.val_iters = 0
-    # p.query_glob = ['7*.sql']
-    # p.test_query_glob = ['7c.sql']
+    # p.query_glob = ['1[a-z].sql']
+    # p.test_query_glob = ['1d.sql']
     # p.search_until_n_complete_plans = 1
+
+    p.sim_checkpoint = None
+    p.plan_physical = False
+    p.generic_ops_only_for_min_card_cost = True
+    p.engine = 'duckdb'
+    p.search_space_join_ops = []
+    p.search_space_scan_ops = []
+    p.initial_timeout_ms = 600000
 
     agent = BalsaAgent(p)
     agent.Run()
