@@ -121,7 +121,8 @@ the agent neural network and query execution.
 
     # Load data + run analyze (can take several minutes)
     cd ~/balsa
-    bash load-postgres/load_job_postgres.sh ~/datasets/job
+    bash load_db/load_job_postgres.sh ~/datasets/job
+    python3 load_db/load_to_duckdb.py
     ```
 
     Perform basic checks:

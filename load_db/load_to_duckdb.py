@@ -8,7 +8,7 @@ FLAGS = flags.FLAGS
 
 home_dir = str(Path.home())
 flags.DEFINE_string('csv_dir', os.path.join(home_dir, 'datasets', 'job'), 'Absolute or relative path to the directory to IMDB CSVs.')
-flags.DEFINE_string('db_path', os.path.join(home_dir, 'duckdb', 'imdb.db'),
+flags.DEFINE_string('db_path', os.path.join(home_dir, 'imdb.db'),
                     'Absolute or relative path to the DuckDB database file.')
 
 table_creation_sql_dict = {

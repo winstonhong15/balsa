@@ -13,7 +13,7 @@ Result = collections.namedtuple(
     ['result', 'has_timeout', 'latency', 'server_ip'],
 )
 
-dsn = os.path.join(str(Path.home()), 'duckdb', 'imdb.db')
+dsn = os.path.join(str(Path.home()), 'imdb.db')
 
 @contextlib.contextmanager
 def Cursor(dsn=dsn):
