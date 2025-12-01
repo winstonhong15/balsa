@@ -888,7 +888,8 @@ class Sim(object):
         assert isinstance(loggers[-1], pl_loggers.WandbLogger), loggers[-1]
         self._LogPostgresConfigs(wandb_logger=loggers[-1])
         return pl.Trainer(
-            gpus=1 if torch.cuda.is_available() else 0,
+            # gpus=1 if torch.cuda.is_available() else 0,
+            gpus=0,
             max_epochs=p.epochs,
             # Add logging metrics per this many batches.
             row_log_interval=10,

@@ -140,7 +140,7 @@ def ParseExecutionResult(result_tup,
             raise NotImplementedError
         elif engine == 'duckdb':
             do_hint_check = False
-        elif engine == 'postgre':
+        elif engine == 'postgres':
             if not has_timeout:
                 executed_node = postgres.ParsePostgresPlanJson(json_dict)
             else:

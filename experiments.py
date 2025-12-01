@@ -136,6 +136,7 @@ class BalsaParams(object):
                  ' all model parameters together. 0 means no clipping.')
         p.Define('early_stop_on_skip_fraction', None,
                  'If seen plans for x% of train queries produced, early stop.')
+        p.Define('censored_observation', False, 'Use censored observation when compute loss.')
         # Validation.
         p.Define('validate_fraction', 0.1,
                  'Sample this fraction of the dataset as the validation set.  '\

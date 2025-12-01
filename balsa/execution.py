@@ -37,7 +37,7 @@ class PerQueryTimeoutController(object):
         self.num_consecutive_timeout_iters = 0
         self.iter_executed = False
 
-    def GetTimeout(self, query_node):
+    def GetTimeout(self):
         if self.no_op:
             return None
         if self.iter_timeout_ms is None:

@@ -320,7 +320,8 @@ class BalsaModel(pl.LightningModule):
                  l2_lambda=0,
                  learning_rate=None,
                  optimizer_state_dict=None,
-                 reduce_lr_within_val_iter=False):
+                 reduce_lr_within_val_iter=False,
+                 timeout_controller=None):
         super().__init__()
         self.logging_prefix = ''
         self.params = params.Copy()
@@ -337,6 +338,8 @@ class BalsaModel(pl.LightningModule):
         self.learning_rate = learning_rate
         # Optionally, reduce within each trainer.fit() call (i.e., an iter).
         self.reduce_lr_within_val_iter = reduce_lr_within_val_iter
+        # For censorsed observation
+        self.timeout_controller = timeout_controller
 
     def SetLoggingPrefix(self, prefix):
         """Useful for prepending value iteration numbers."""
@@ -389,17 +392,20 @@ class BalsaModel(pl.LightningModule):
         )['param_groups'][0]['lr']
 
     def training_step(self, batch, batch_idx):
-        loss, l2_loss = self._ComputeLoss(batch)
+        loss, l2_loss, num_total, num_timeouts, num_timeout_and_over_estimate = self._ComputeLoss(batch)
         result = pl.TrainResult(minimize=loss)
         # Log both a per-iter metric and an overall metric for comparison.
         result.log('{}loss'.format(self.logging_prefix), loss, prog_bar=False)
         result.log('train_loss', loss, prog_bar=True)
         if self.l2_lambda > 0:
             result.log('l2_loss', l2_loss, prog_bar=False)
+        result.log('num_total_training', num_total)
+        result.log('num_timeouts_training', num_timeouts)
+        result.log('num_timeout_and_over_estimate', num_timeout_and_over_estimate)
         return result
 
     def validation_step(self, batch, batch_idx):
-        val_loss, l2_loss = self._ComputeLoss(batch)
+        val_loss, l2_loss, _, _, _ = self._ComputeLoss(batch)
         result = pl.EvalResult(checkpoint_on=val_loss, early_stop_on=val_loss)
         result.log('{}val_loss'.format(self.logging_prefix),
                    val_loss,
@@ -422,6 +428,11 @@ class BalsaModel(pl.LightningModule):
                                                   batch.indexes.to(dev),
                                                   batch.costs.to(dev))
         output = self.forward(query_feat, plan_feat, indexes)
+
+        num_timeouts = 0
+        num_timeout_and_over_estimate = 0
+        num_total = 0
+        
         if p.cross_entropy:
             log_probs = output.log_softmax(-1)
             target_dist = torch.zeros_like(log_probs)
@@ -442,15 +453,44 @@ class BalsaModel(pl.LightningModule):
                 target_inverted = self.torch_invert_cost(target.reshape(-1,))
                 loss = train_utils.QErrorLoss(output_inverted, target_inverted)
             else:
-                loss = F.mse_loss(output.reshape(-1,), target.reshape(-1,))
+                output_flat = output.reshape(-1,)
+                target_flat = target.reshape(-1,)
+
+                # Get the current timeout value
+                curr_timeout = None
+                if self.timeout_controller:
+                    curr_timeout = self.timeout_controller.GetTimeout()
+                    output_inverted = self.torch_invert_cost(output.reshape(-1,))
+                    target_inverted = self.torch_invert_cost(target.reshape(-1,))
+
+                    timeout_mask = timeout_mask = torch.isclose(target_inverted, torch.full_like(target_inverted, 4096 * 1000), atol=1.0)
+                    condition = timeout_mask & (output_inverted >= curr_timeout)
+
+
+                    num_timeouts = timeout_mask.sum().item()
+                    num_timeout_and_over_estimate = condition.sum().item()
+                    num_total = target_flat.shape[0]
+
+                    if p.censored_observation:
+                        squared_error = (output_flat - target_flat) ** 2
+                        elementwise_loss = torch.where(condition,
+                                                    torch.zeros_like(squared_error),
+                                                    squared_error)
+                        loss = elementwise_loss.mean()
+                    else:
+                        loss = F.mse_loss(output_flat, target_flat)
+                else:
+                    num_total = target_flat.shape[0]
+                    loss = F.mse_loss(output_flat, target_flat)
+        
         if self.l2_lambda > 0:
             l2_loss = torch.tensor(0., device=loss.device, requires_grad=True)
             for param in self.parameters():
                 l2_loss = l2_loss + torch.norm(param).pow(2)
             l2_loss = self.l2_lambda * 0.5 * l2_loss
             loss += l2_loss
-            return loss, l2_loss
-        return loss, None
+            return loss, l2_loss, num_total, num_timeouts, num_timeout_and_over_estimate
+        return loss, None, num_total, num_timeouts, num_timeout_and_over_estimate
 
     def on_after_backward(self):
         if self.global_step % 10 == 0:
@@ -856,7 +896,8 @@ class BalsaAgent(object):
             if self.adaptive_lr_schedule is None else
             self.adaptive_lr_schedule.Get(),
             optimizer_state_dict=self.prev_optimizer_state_dict,
-            reduce_lr_within_val_iter=p.reduce_lr_within_val_iter)
+            reduce_lr_within_val_iter=p.reduce_lr_within_val_iter,
+            timeout_controller=self.timeout_controller)
         print('iter', self.curr_value_iter, 'lr', model.learning_rate)
         if p.agent_checkpoint is not None and self.curr_value_iter == 0:
             ckpt = torch.load(p.agent_checkpoint,
@@ -1266,7 +1307,7 @@ class BalsaAgent(object):
                 # Roughly 18 mins.  Good enough to cover disk filled error.
                 curr_timeout = 1100000
             else:
-                curr_timeout = self.timeout_controller.GetTimeout(node)
+                curr_timeout = self.timeout_controller.GetTimeout()
             print('q{},(predicted {:.1f}),{}'.format(node.info['query_name'],
                                                      predicted_latency,
                                                      hint_str))
@@ -1965,8 +2006,8 @@ def Main(argv):
     # Override params here for quick debugging.
     # p.epochs = 1
     # p.val_iters = 0
-    # p.query_glob = ['1[a-z].sql']
-    # p.test_query_glob = ['1d.sql']
+    # p.query_glob = ['13[a-z].sql']
+    # p.test_query_glob = ['13d.sql']
     # p.search_until_n_complete_plans = 1
 
     p.sim_checkpoint = None
@@ -1976,6 +2017,7 @@ def Main(argv):
     p.search_space_join_ops = []
     p.search_space_scan_ops = []
     p.initial_timeout_ms = 600000
+    p.censored_observation = False
 
     agent = BalsaAgent(p)
     agent.Run()
