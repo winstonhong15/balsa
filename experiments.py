@@ -33,6 +33,10 @@ RAND_52_TEST_QUERIES = [
     '22b.sql', '17c.sql', '24b.sql', '10a.sql', '22c.sql'
 ]
 
+RAND_52_COMPLEX_TEST_QUERIES = [
+    '2.sql', '9.sql', '12.sql', '16.sql', '17.sql', '24.sql'
+]
+
 LR_SCHEDULES = {
     'C': {
         'lr_piecewise': [
@@ -350,6 +354,17 @@ class BaselineExtJOB(Baseline):
         p.query_dir = 'queries/join-order-benchmark-extended'
         p.test_query_glob = ['e*.sql']
         return p
+    
+
+@balsa.params_registry.Register
+class BaselineJOBComplex(Baseline):
+
+    def Params(self):
+        p = super().Params()
+        p.query_glob = ['*.sql']
+        p.test_query_glob = RAND_52_COMPLEX_TEST_QUERIES
+        p.query_dir = 'queries/join-order-benchmark-complex'
+        return p
 
 
 ########################## Main Balsa agents ##########################
@@ -567,6 +582,20 @@ class Balsa8x_TrainJOB_TestExtJOB(Balsa1x_TrainJOB_TestExtJOB):
         p.prev_replay_buffers_glob_val = './replays/EXTJOB/val/*pkl'
         return p
 
+
+########################## JOB-Complex exerpiments ########################
+
+@balsa.params_registry.Register  # keep
+class Balsa_JOB_Complex(Balsa_JOBRandSplit):
+
+    def Params(self):
+        p = super().Params()
+
+        p.query_dir = 'queries/join-order-benchmark-complex'
+        p.query_glob = ['*.sql']
+        p.test_query_glob = RAND_52_COMPLEX_TEST_QUERIES
+
+        return p
 
 ########################## Neo-impl experiments ##########################
 

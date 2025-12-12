@@ -222,7 +222,11 @@ class DynamicProgramming(object):
         """
         p = self.params
         join_graph, all_join_conds = query_node.GetOrParseSql()
-        assert len(join_graph.edges) == len(all_join_conds)
+
+        # In some queries (JOB-Complex) there can be multiple join predicates between the same
+        # pair of relations; the graph stores a single edge while
+        # all_join_conds keeps every predicate. Allow that case
+        assert len(join_graph.edges) <= len(all_join_conds)
         # Base tables to join.
         query_leaves = query_node.CopyLeaves()
         dp_tables = collections.defaultdict(dict)  # level -> dp_table

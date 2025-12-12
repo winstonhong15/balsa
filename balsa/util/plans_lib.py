@@ -595,6 +595,11 @@ def GatherUnaryFiltersInfo(nodes, with_alias=True, alias_only=False):
     if isinstance(nodes, Node):
         nodes = [nodes]
 
+    def _aliases_in_filter(filter_str):
+        """Return set of table qualifiers used in a filter expression."""
+        # Matches "alias.column" and returns the alias portion.
+        return set(re.findall(r'\b([A-Za-z_][A-Za-z0-9_]*)\.', filter_str))
+
     for node in nodes:
         d = {}
 
@@ -608,7 +613,18 @@ def GatherUnaryFiltersInfo(nodes, with_alias=True, alias_only=False):
                 # whose corresponding pred is just 'chn.id = ci.person_role_id'.
                 table_id = leaf.get_table_id(with_alias, alias_only)
                 assert table_id not in d, (leaf.info, table_id, d)
-                d[table_id] = leaf.info['filter']
+                filter_str = leaf.info['filter']
+                allowed_aliases = set(
+                    a for a in (leaf.table_alias, leaf.table_name) if a)
+                aliases_used = _aliases_in_filter(filter_str)
+                # Skip filters that reference outer aliases (e.g., parameterized
+                # nested loop scans); these cannot be applied as standalone
+                # predicates when estimating row counts.
+                if aliases_used and not aliases_used.issubset(allowed_aliases):
+                    print('Skipping non-unary filter for {}: {}'.format(
+                        table_id, filter_str))
+                    return
+                d[table_id] = filter_str
 
         MapLeaves(node, f)
         node.info['all_filters'] = d
